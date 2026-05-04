@@ -228,12 +228,12 @@ def vca(Y, p):
     R    = np.zeros((L, p), dtype=np.float32)
 
     for i in range(p):
-        f = np.random.randn(N)
+        f = np.random.randn(L)          # (L,)
         if i > 0:
-            U = np.linalg.svd(R[:, :i], full_matrices=False)[0]
-            f = f - U @ (U.T @ Y) @ (np.linalg.pinv(Y) @ f)
-        idx      = np.argmax(np.abs(Y.T @ f))
-        R[:, i]  = Y[:, idx]
+            U = np.linalg.svd(R[:, :i], full_matrices=False)[0]   # (L, i)
+            f = f - U @ (U.T @ f)       # project f ⊥ to known subspace
+        idx     = np.argmax(np.abs(Y.T @ f))   # (N,L)@(L,) → (N,)
+        R[:, i] = Y[:, idx]
 
     return torch.tensor(R, dtype=torch.float32)
 
