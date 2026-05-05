@@ -18,6 +18,16 @@ PRESETS = {
         p=4, h=100, w=100,
         epochs=2000, lr=5e-3
     ),
+    "cuprite": dict(
+        y_key="X", gt_key=None, em_key="M",
+        p=4, h=512, w=614,
+        epochs=3000, lr=5e-3
+    ),
+    "chandrayaan": dict(
+        y_key="X", gt_key=None, em_key="M",
+        p=4, h=512, w=614,
+        epochs=3000, lr=5e-3
+    )
 }
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -308,4 +318,413 @@ class EVNet(nn.Module):
         Mn = torch.bmm(M0_exp, psi) + dM
         Mn = torch.clamp(Mn, 0, 1)
         return Mn, mu, logv
+    
+class SSAFNet(nn.Module):
+    def __init__(self, L, P, J=4, M0=None):
+        super().__init__()
+        self.L = L
+        self.P = P
+        self.enc_spa = EncoderSpa(L, P)
+        self.enc_spe = EncoderSpe(L, P)
+        self.ev_net = EVNet(L, P, J, M0)
 
+    def decode(self, A, Mn):
+        """
+        A:  (B, P, H, W)
+        Mn: (N, L, P), N = B*H*W
+        Change to: (B, L, H, W)
+        """
+        B, _, H, W = A.shape
+        N = B * H * W
+        a = A.permute(0, 2, 3, 1).reshape(N, self.P, 1) # (N, P, 1)
+        y_hat = torch.bmm(Mn, a).squeeze(-1) # (N, L)
+        y_hat = y_hat.view(B, H, W, self.L).permute(0, 3, 1, 2) # (B, L, H, W)
+        return y_hat
+    
+    def forward(self, x): # x: (B, L, H, W)
+        B, _, H, W = x.shape
+        N = B * H * W
+
+        A1 = self.enc_spa(x)
+        y_flat = x.permute(0, 2, 3, 1).reshape(N, self.L)
+        Mn, mu, logv = self.ev_net(y_flat)
+        Y1 = self.decode(A1, Mn)
+        A2 = self.enc_spe(Y1)
+        Y2 = self.decode(A2, Mn)
+
+        return Y1, Y2, A1, A2, Mn, mu, logv
+
+# Loss functions
+def kl_loss(mu, logv):
+    return -0.5 * torch.mean(1 + logv - mu.pow(2) - logv.exp())
+
+def sad_loss(Mn):
+    # Angular spread of per-pixel endmembers around their mean — no GT
+    mean_m = Mn.mean(dim=0, keepdim=True)
+    cos = F.cosine_similarity(Mn, mean_m.expand_as(Mn), dim=1)
+    return torch.acos(cos.clamp(-1 + 1e-6, 1 - 1e-6)).mean()
+
+def vol_loss(Mn):
+    # Endmember compactness - no GT
+    mean_p = Mn.mean(dim=2, keepdim=True)
+    return ((Mn - mean_p) ** 2).mean()
+
+def total_loss(Y, Y1, Y2, mu, logv, Mn, alpha=0.5, lam_kl=0.1, lam_sad=0.1, lam_vol=0.1):
+    rec = alpha * F.mse_loss(Y1, Y) + (1 - alpha) * F.mse_loss(Y2, Y)
+    return rec + lam_kl * kl_loss(mu, logv) + lam_sad * sad_loss(Mn) + lam_vol * vol_loss(Mn)
+
+# Data loading
+import scipy.io as sio
+
+def load_data(args, preset):
+    # Returns Y_np (L, H, W), A_true (P, N) or None, M_true (L, P) or None
+    p = args.p or preset.get("p")
+    h = args.h or preset.get("h")
+    w = args.w or preset.get("w")
+
+    y_key = args.y_key or preset.get("y_key", "Y")
+    gt_key = args.gt_key or preset.get("gt_key", "A")
+    em_key = args.em_key or preset.get("em_key", "M")
+    band_mask = preset.get("band_mask", None)
+
+    if(p is None or h is None or w is None):
+        raise ValueError("Specify --p, --h, --w or use a named --dataset preset.")
+
+    if args.mat:
+        mat = sio.loadmat(args.mat)
+        Y = mat[y_key].astype(np.float32)
+        A_true = mat[gt_key].astype(np.float32) if gt_key in mat else None
+        M_true = mat[em_key].astype(np.float32) if em_key in mat else None
+    elif args.npy:
+        Y = np.load(args.npy).astype(np.float32)
+        A_true = np.load(args.npy_a).astype(np.float32) if args.npy_a else None
+        M_true = np.load(args.npy_m).astype(np.float32) if args.npy_m else None
+    else:
+        raise ValueError("Provide --mat or --npy")
+    
+    # Shape Normalization
+    if Y.ndim == 3:
+        if Y.shape[0] == h and Y.shape[1] == w:
+            Y = Y.transpose(2, 0, 1) # (L, H, W) → (L, H, W)
+    elif Y.ndim == 2:
+        if Y.shape[1] == h * w:
+            Y = Y.reshape(-1, h, w) # (L, N) → (L, H, W)
+        elif Y.shape[0] == h * w:
+            Y = Y.T.reshape(-1, h, w)
+        else:
+            raise ValueError(f"Cannot reshape Y of shape {Y.shape} to (L, H, W) with H={h}, W={w}")
+        
+    # Band masking
+    if band_mask is not None:
+        keep = np.setdiff1d(np.arange(Y.shape[0]), band_mask)
+        Y = Y[keep]
+
+    # Normalization to [0, 1]
+    vmax = Y.max()
+    if vmax > 0:
+        Y = Y / vmax
+
+    L = Y.shape[0]
+    N = h * w
+
+    # GT shape fixes
+    if A_true is not None:
+        try:
+            A_true = A_true.reshape(p, N)
+        except ValueError:
+            A_true = A_true.T.reshape(p, N)
+
+    if M_true is not None:
+        try:
+            M_true = M_true.reshape(L, p)
+        except ValueError:
+            M_true = M_true.T.reshape(L, p) 
+
+    print(f"Cube: L = {L}, H = {h}, W = {w}, N = {N}")
+    print(f"A_true: {"yes" if A_true is not None else "no"}, M_true: {"yes" if M_true is not None else "no"}")
+    return Y, A_true, M_true, p, h, w, L
+
+# Metrics
+def rmse(a, b):
+    return float(np.sqrt(np.mean((a - b) ** 2)))
+
+def sad_metric(m1, m2):
+    # m1, m2: (L, ) vectors
+    cos = np.dot(m1, m2) / (np.linalg.norm(m1) * np.linalg.norm(m2) + 1e-10)
+    return float(np.arccos(np.clip(cos, -1 + 1e-6, 1 - 1e-6)))
+
+def align_and_eval(A_hat, M_hat_mean, A_true, M_true):
+    """
+    Hungarian-style greedy alignment of estimated vs. true endmembers.
+    A_hat      : (P, N)
+    M_hat_mean : (L, P)  — mean of per-pixel endmembers
+    A_true     : (P, N)
+    M_true     : (L, P) or None
+    Returns dict of metrics.
+    """
+    P = A_hat.shape[0]
+    # Build cost matrix on abundance RMSE
+    cost = np.array([[rmse(A_hat[i], A_true[j]) for j in range(P)] for i in range(P)])
+    order = np.argmin(cost, axis=1)
+
+    A_aligned = A_hat[order]
+    rmse_a = rmse(A_aligned, A_true)
+    out = dict(rmse_a=rmse_a, order=order)
+
+    if M_true is not None:
+        M_aligned = M_hat_mean[:, order]
+        sad_vals = [sad_metric(M_aligned[:, i], M_true[:, i]) for i in range(P)]
+        out["rmse_m"] = rmse(M_aligned, M_true)
+        out["sad_m"] = float(np.mean(sad_vals))
+        out["sad_per_em"] = sad_vals
+    return out
+
+# Plotting
+def save_abundance_maps(A_hat, P, out_dir, name="abundance_maps.png"):
+    fig, axes = plt.subplots(1, P, figsize=(4 * P, 3.5))
+    if P == 1:
+        axes = [axes]
+    for i, ax in enumerate(axes):
+        im = ax.imshow(A_hat[i].reshape(-1, A_hat.shape[-1]) if A_hat.ndim == 2 else A_hat[i], cmap="jet", vmin=0, vmax=1)
+        ax.set_title(f"Endmember {i+1}", fontsize=12)
+        ax.axis("off")
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    plt.suptitle("Estimated Abundance Maps", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, name)
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved: {path}")
+
+def save_endmember_spectra(M_mean, P, L, out_dir,  M_true=None, name="endmember_spectra.png"):
+    fig, axes = plt.subplots(1, P, figsize=(4 * P, 3), sharey=True)
+    if P == 1:
+        axes = [axes]
+    wl = np.arange(L)
+
+    for i, ax in enumerate(axes):
+        ax.plot(wl, M_mean[:, i], label="Estimated", color="#2d6a9f", lw=1.5)
+        if M_true is not None:
+            ax.plot(wl, M_true[:, i], label="GT", color="#e74c3c", lw=1.2, ls="--")
+
+        ax.set_title(f"Endmember {i+1}", fontsize=12)
+        ax.set_xlabel("Band")
+
+        if i == 0:
+            ax.set_ylabel("Reflectance")
+        ax.legend(fontsize=8)
+
+    plt.suptitle("Estimated Endmember Spectra", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, name)
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved: {path}")
+
+def save_loss_curve(losses, out_dir, name="loss_curve.png"):
+    plt.figure(figsize=(8, 4))
+    plt.plot(losses, color="#9b59b6", lw=1.2)
+    plt.xlabel("Epoch")
+    plt.ylabel("Total Loss")
+    plt.title("Training Loss Curve")
+    plt.yscale("log")
+    plt.grid(alpha=0.3)
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, name)
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved: {path}")
+
+# Train loop
+def train(Y_np, P, H, W, L, out_dir,
+          epochs = 2000,
+          lr = 5e-3,
+          J = 4,
+          alpha = 0.5,
+          lam_kl = 0.1,
+          lam_sad = 0.1,
+          lam_vol = 0.1):
+    """
+    Y_np : (L, H, W)  float32, values in [0,1]
+    Returns A_hat (P, H, W), M_mean (L, P), loss_history (list)
+    """
+    # VCA initialisation
+    print("\nRunning VCA for endmember initialisation...")
+    Y_flat = Y_np.reshape(L, -1) # (L, N)
+    M0 = vca(Y_flat, P).to(DEVICE) # (L, P)
+
+    model = SSAFNet(L, P, J, M0).to(DEVICE)
+
+    # Kaiming init
+    for m in model.modules():
+        if isinstance(m, nn.Conv2d):
+            nn.init.kaiming_uniform_(m.weight)
+        elif isinstance(m, nn.Linear):
+            nn.init.kaiming_uniform_(m.weight)
+        if hasattr(m, "bias") and m.bias is not None:
+            nn.init.zeros_(m.bias)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr * 0.01)
+
+    Y_tensor = torch.tensor(Y_np, dtype=torch.float32).unsqueeze(0).to(DEVICE) # (1, L, H, W)
+    losses = []
+
+    print(f"\nTraining SSAF-Net for {epochs} epochs on {DEVICE}")
+    tic = time()
+
+    for epoch in tqdm(range(1, epochs + 1), desc="Training"):
+        model.train()
+        Y1, Y2, A1, A2, Mn, mu, logv = model(Y_tensor)
+        loss = total_loss(Y_tensor, Y1, Y2, mu, logv, Mn, alpha, lam_kl, lam_sad, lam_vol)
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        scheduler.step()
+        losses.append(float(loss.item()))
+        if epoch % 100 == 0 or epoch == 1:
+            print(f"Epoch {epoch}/{epochs} - Loss: {loss.item():.4f} - LR: {scheduler.get_last_lr()[0]:.6f}")
+    
+    toc = time()
+    print(f"\nTraining completed in {(toc - tic):.1f}s | Final loss: {losses[-1]:.6f}")
+
+    # Extract results
+    model.eval()
+    with torch.no_grad():
+        _, _, A1, _, Mn, _, _ = model(Y_tensor)
+
+    A_hat = A1.squeeze(0).cpu().numpy() # (P, H, W)
+    Mn_np = Mn.cpu().numpy() # (N, L, P)
+    M_mean = Mn_np.mean(axis=0) # (L, P)
+
+    return A_hat, M_mean, losses
+
+def main(args):
+    preset = PRESETS.get(args.dataset, {})
+    out_dir = args.out_dir or os.path.join("results", args.dataset or "custom")
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Step 1: Load data
+    print("Loading data...")
+    Y_np, A_true, M_true, P_preset, H, W, L = load_data(args, preset)
+    N = H * W
+
+    # Step 2: Estimate P (if not forced)
+    if args.p:
+        P = args.p
+        print(f"Using user-specified P = {P}")
+    elif P_preset:
+        P = P_preset
+        print(f"Using preset P = {P} for dataset '{args.dataset}'")
+        print("Running estimation for reference only")
+        estimate_p(Y_np.reshape(L, -1), out_dir, max_p=min(30, L - 1))
+    else:
+        print("Estimating number of endmembers P...")
+        P = estimate_p(Y_np.reshape(L, -1), out_dir, max_p=min(30, L - 1))
+
+    epochs = args.epochs or preset.get("epochs", 2000)
+    lr = args.lr or preset.get("lr", 5e-3)
+
+    # Steps 3-4: Train
+    A_hat, M_mean, losses = train(
+        Y_np, P, H, W, L, 
+        out_dir, epochs=epochs, 
+        lr=lr, J=args.z_dim, 
+        lam_kl=args.lam_kl, 
+        lam_sad=args.lam_sad, 
+        lam_vol=args.lam_vol
+    )
+
+    # Step 5: Save plots
+    print("\nSaving results...")
+    save_loss_curve(losses, out_dir)
+    save_abundance_maps(A_hat, P, out_dir)
+    save_endmember_spectra(M_mean, P, L, out_dir, M_true)
+
+    # Step 6: Metrics (if GT available)
+    if A_true is not None:
+        print("\nEvaluating metrics against GT...")
+        A_hat_flat = A_hat.reshape(P, N)
+        metrics = align_and_eval(A_hat_flat, M_mean, A_true, M_true)
+
+        print("=" * 40)
+        print("Dataset: ", args.dataset or "custom")
+        print(f"aRMSE_A: {metrics['rmse_a']:.6f}")
+        if "rmse_m" in metrics:
+            print(f"aRMSE_M: {metrics['rmse_m']:.6f}")
+            print(f"aSAD_M: {metrics['sad_m']:.4f} radians ({np.degrees(metrics['sad_m']):.2f}°)")
+            for i, s in enumerate(metrics["sad_per_em"]):
+                print(f"  Endmember {i+1} SAD: {s:.4f} radians ({np.degrees(s):.2f}°)")
+        print("=" * 40)
+
+        if A_true is not None:
+            fig, axes = plt.subplots(2, P, figsize=(4 * P, 7))
+            order = metrics["order"]
+            for i in range(P):
+                ax = axes[0, i]
+                ax.imshow(A_hat[order[i]].reshape(H, W), cmap="jet", vmin=0, vmax=1)
+                ax.set_title(f"Est. EM #{i+1}", fontsize=10)
+                ax.axis("off")
+
+                ax = axes[1, i]
+                ax.imshow(A_true[i].reshape(H, W), cmap="jet", vmin=0, vmax=1)
+                ax.set_title(f"GT EM #{i+1}", fontsize=10)
+                ax.axis("off")
+            plt.suptitle("Abundance Map Comparison", fontsize=14, fontweight="bold")
+            plt.tight_layout()
+
+            os.makedirs(out_dir, exist_ok=True)
+            cmp_path = os.path.join(out_dir, "abundance_comparison.png")
+            plt.savefig(cmp_path, dpi=150)
+            plt.close()
+            print(f"Saved: {cmp_path}")
+    else:
+        print("\nNo GT available, skipping quantitative evaluation.")
+
+    # Save numpy arrays
+    np.save(os.path.join(out_dir, "A_hat.npy"), A_hat)
+    np.save(os.path.join(out_dir, "M_mean.npy"), M_mean)
+    print(f"Saved: A_hat.npy, M_mean.npy in {out_dir}")
+    print(f"\nAll outputs saved in {out_dir}")
+
+# CLI
+def get_args():
+    pa = argparse.ArgumentParser(description="SSAF-Net for Hyperspectral Unmixing")
+
+    # Data
+    pa.add_argument("--dataset", type=str, default="custom", help="Named preset: jasper|apex|dc2 (default: custom)")
+    pa.add_argument("--mat", type=str, default=None, help="Path to .mat file")
+    pa.add_argument("--npy", type=str, default=None, help="Path to .npy file")
+    pa.add_argument("--npy_a", type=str, default=None, help="Path to abundance .npy file")
+    pa.add_argument("--npy_m", type=str, default=None, help="Path to endmember .npy file")
+    pa.add_argument("--y_key", type=str, default=None, help="Key for hyperspectral data in .mat")
+    pa.add_argument("--gt_key", type=str, default=None, help="Key for abundance GT in .mat")
+    pa.add_argument("--em_key", type=str, default=None, help="Key for endmember GT in .mat")
+
+    # Dimensions (Override presets)
+    pa.add_argument("--p", type=int, default=None, help="Number of endmembers (P) (If omitted, estimation will be run)")
+    pa.add_argument("--h", type=int, default=None, help="Height (H)")
+    pa.add_argument("--w", type=int, default=None, help="Width (W)")
+
+    # Training
+    pa.add_argument("--epochs", type=int, default=None, help="Number of training epochs")
+    pa.add_argument("--lr", type=float, default=None, help="Learning rate")
+    pa.add_argument("--z_dim", type=int, default=4, help="Latent dimension J for EV-Net (default: 4)")
+    pa.add_argument("--lam_kl", type=float, default=0.1, help="Weight for KL divergence loss (default: 0.1)")
+    pa.add_argument("--lam_sad", type=float, default=0.1, help="Weight for SAD loss (default: 0.1)")
+    pa.add_argument("--lam_vol", type=float, default=0.1, help="Weight for volume loss (default: 0.1)")
+
+    # Output
+    pa.add_argument("--out_dir", type=str, default="results", help="Directory to save results (default: results/{dataset})")
+
+    return pa.parse_args()
+
+if __name__ == "__main__":
+    torch.manual_seed(42)
+    np.random.seed(42)
+    main(get_args())

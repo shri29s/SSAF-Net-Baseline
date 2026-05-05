@@ -1,2 +1,5 @@
 venv/
 .vscode/
+dataset/source_datasets/
+__pycache__/
+*.ipynb_checkpoints
