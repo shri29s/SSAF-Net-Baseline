@@ -1,0 +1,62 @@
+[2026-05-06 10:54:33] 
+[Step 1] Loading data from cuprite
+[2026-05-06 10:54:33]   -> Output directory: results\cuprite
+[2026-05-06 10:54:33]   -> Log file: results\cuprite\training.log
+[2026-05-06 10:54:33]   -> Cube dimensions: L=188, H=512, W=614, N=314368
+[2026-05-06 10:54:33]   -> GT available - Abundance: no, Endmembers: yes
+[2026-05-06 10:54:33]   [OK] Data loaded successfully
+[2026-05-06 10:54:33] 
+[Step 2] Determining number of endmembers (P)
+[2026-05-06 10:54:33]   -> Using preset P = 4 for dataset 'cuprite'
+[2026-05-06 10:54:33] 
+[Step 3] Training SSAFNet model
+[2026-05-06 10:54:33]   [Initializing endmembers with VCA]
+[2026-05-06 10:54:34]   [OK] VCA initialization complete (P=4 endmembers)
+[2026-05-06 10:54:34]   [Building SSAFNet model]
+[2026-05-06 10:54:34]   [OK] Model created on cuda
+[2026-05-06 10:54:34]   [Training for 3000 epochs (LR=0.005)]
+[2026-05-06 10:54:35]   -> Epoch 1/ 3000 | Loss: 0.2999 | LR: 0.005000
+[2026-05-06 10:55:24]   -> Epoch 100/ 3000 | Loss: 0.0134 | LR: 0.004986
+[2026-05-06 10:56:13]   -> Epoch 200/ 3000 | Loss: 0.0045 | LR: 0.004946
+[2026-05-06 10:57:03]   -> Epoch 300/ 3000 | Loss: 0.0032 | LR: 0.004879
+[2026-05-06 10:57:53]   -> Epoch 400/ 3000 | Loss: 0.0024 | LR: 0.004786
+[2026-05-06 10:58:42]   -> Epoch 500/ 3000 | Loss: 0.0022 | LR: 0.004668
+[2026-05-06 10:59:32]   -> Epoch 600/ 3000 | Loss: 0.0034 | LR: 0.004527
+[2026-05-06 11:00:21]   -> Epoch 700/ 3000 | Loss: 0.0028 | LR: 0.004364
+[2026-05-06 11:01:11]   -> Epoch 800/ 3000 | Loss: 0.0027 | LR: 0.004181
+[2026-05-06 11:02:01]   -> Epoch 900/ 3000 | Loss: 0.0024 | LR: 0.003980
+[2026-05-06 11:02:50]   -> Epoch 1000/ 3000 | Loss: 0.0022 | LR: 0.003762
+[2026-05-06 11:04:00]   -> Epoch 1100/ 3000 | Loss: 0.0020 | LR: 0.003532
+[2026-05-06 11:05:00]   -> Epoch 1200/ 3000 | Loss: 0.0019 | LR: 0.003290
+[2026-05-06 11:06:01]   -> Epoch 1300/ 3000 | Loss: 0.0019 | LR: 0.003040
+[2026-05-06 11:11:18]   -> Epoch 1400/ 3000 | Loss: 0.0019 | LR: 0.002784
+[2026-05-06 11:17:24]   -> Epoch 1500/ 3000 | Loss: 0.0018 | LR: 0.002525
+[2026-05-06 11:19:23]   -> Epoch 1600/ 3000 | Loss: 0.0018 | LR: 0.002266
+[2026-05-06 11:20:11]   -> Epoch 1700/ 3000 | Loss: 0.0018 | LR: 0.002010
+[2026-05-06 11:21:00]   -> Epoch 1800/ 3000 | Loss: 0.0019 | LR: 0.001760
+[2026-05-06 11:21:48]   -> Epoch 1900/ 3000 | Loss: 0.0020 | LR: 0.001518
+[2026-05-06 11:22:36]   -> Epoch 2000/ 3000 | Loss: 0.0018 | LR: 0.001287
+[2026-05-06 11:23:24]   -> Epoch 2100/ 3000 | Loss: 0.0018 | LR: 0.001070
+[2026-05-06 11:24:11]   -> Epoch 2200/ 3000 | Loss: 0.0018 | LR: 0.000869
+[2026-05-06 11:24:59]   -> Epoch 2300/ 3000 | Loss: 0.0018 | LR: 0.000686
+[2026-05-06 11:25:46]   -> Epoch 2400/ 3000 | Loss: 0.0018 | LR: 0.000523
+[2026-05-06 11:26:34]   -> Epoch 2500/ 3000 | Loss: 0.0018 | LR: 0.000382
+[2026-05-06 11:27:21]   -> Epoch 2600/ 3000 | Loss: 0.0018 | LR: 0.000264
+[2026-05-06 11:28:09]   -> Epoch 2700/ 3000 | Loss: 0.0018 | LR: 0.000171
+[2026-05-06 11:28:57]   -> Epoch 2800/ 3000 | Loss: 0.0018 | LR: 0.000104
+[2026-05-06 11:29:44]   -> Epoch 2900/ 3000 | Loss: 0.0018 | LR: 0.000064
+[2026-05-06 11:30:32]   -> Epoch 3000/ 3000 | Loss: 0.0018 | LR: 0.000050
+[2026-05-06 11:30:32]   [OK] Training completed in 2157.4s | Final loss: 0.001776
+[2026-05-06 11:30:32]   [OK] Extracted results: A_hat (4, 512, 614), M_mean (188, 4)
+[2026-05-06 11:30:32] 
+[Step 4] Generating visualizations and saving results
+[2026-05-06 11:30:32]   [OK] Saved loss_curve.png
+[2026-05-06 11:30:33]   [OK] Saved abundance_maps.png
+[2026-05-06 11:30:33]   [OK] Saved endmember_spectra.png
+[2026-05-06 11:30:33] 
+[Step 5] No ground truth available - skipping quantitative evaluation
+[2026-05-06 11:30:33] 
+[Step 6] Saving model outputs
+[2026-05-06 11:30:33]   [OK] Saved A_hat.npy, M_mean.npy
+[2026-05-06 11:30:33]   -> All outputs saved to: results\cuprite
+[2026-05-06 11:30:33]   -> Log file saved to: results\cuprite\training.log

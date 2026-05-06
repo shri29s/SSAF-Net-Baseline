@@ -1,0 +1,19 @@
+[2026-05-06 17:28:47] 
+[Step 1] Loading data from chandrayaan
+[2026-05-06 17:28:47]   -> Output directory: results\chandrayaan
+[2026-05-06 17:28:47]   -> Log file: results\chandrayaan\training.log
+[2026-05-06 17:28:47]   -> Cube dimensions: L=83, H=2995, W=304, N=910480
+[2026-05-06 17:28:47]   -> GT available - Abundance: no, Endmembers: no
+[2026-05-06 17:28:47]   [OK] Data loaded successfully
+[2026-05-06 17:28:47] 
+[Step 2] Determining number of endmembers (P)
+[2026-05-06 17:28:47]   -> User-specified P = 8
+[2026-05-06 17:28:47] 
+[Step 3] Training SSAFNet model
+[2026-05-06 17:28:47]   [Initializing endmembers with VCA]
+[2026-05-06 17:28:50]   [OK] VCA initialization complete (P=8 endmembers)
+[2026-05-06 17:28:50]   [Building SSAFNet model]
+[2026-05-06 17:28:50]   [OK] Model created on cuda
+[2026-05-06 17:28:51]   [Training for 250 epochs (LR=0.005)]
+[2026-05-06 17:29:24]   -> Epoch 1/  250 | Loss: 0.7659 | LR: 0.005000
+[2026-05-06 19:48:17]   -> Epoch 100/  250 | Loss: 0.0718 | LR: 0.003290
