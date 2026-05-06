@@ -17,3 +17,15 @@
 [2026-05-06 17:28:51]   [Training for 250 epochs (LR=0.005)]
 [2026-05-06 17:29:24]   -> Epoch 1/  250 | Loss: 0.7659 | LR: 0.005000
 [2026-05-06 19:48:17]   -> Epoch 100/  250 | Loss: 0.0718 | LR: 0.003290
+[2026-05-06 20:39:01]   -> Epoch 200/  250 | Loss: 0.0543 | LR: 0.000523
+[2026-05-06 20:51:22]   [OK] Training completed in 12150.2s | Final loss: 0.053252
+[2026-05-06 20:51:24]   [OK] Extracted results: A_hat (8, 2995, 304), M_mean (83, 8)
+[2026-05-06 20:51:24] 
+[Step 4] Generating visualizations and saving results
+[2026-05-06 20:51:26] 
+[Step 5] No ground truth available - skipping quantitative evaluation
+[2026-05-06 20:51:26] 
+[Step 6] Saving model outputs
+[2026-05-06 20:51:26]   [OK] Saved A_hat.npy, M_mean.npy
+[2026-05-06 20:51:26]   -> All outputs saved to: results\chandrayaan
+[2026-05-06 20:51:26]   -> Log file saved to: results\chandrayaan\training.log
